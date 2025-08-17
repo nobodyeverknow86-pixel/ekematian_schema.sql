@@ -1,81 +1,144 @@
-# eKematian
+-- =========================
+--   DATABASE eKEMATIAN
+--   Siap Untuk Android & Web
+--   Semua Penambahbaikan 2024
+-- =========================
 
-Sistem pengurusan ahli, kematian, dan bayaran untuk pertubuhan menggunakan Android/SQLite.  
-Struktur database lengkap, mudah digunakan, dan siap untuk penambahbaikan masa depan.
+-- 1. TABLE ADMIN (Login & Sekuriti)
+CREATE TABLE admin (
+  id SERIAL PRIMARY KEY,
+  username VARCHAR(50) UNIQUE NOT NULL,
+  password_hash VARCHAR(255) NOT NULL,
+  role VARCHAR(20) DEFAULT 'admin', -- future proofing
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 
----
+-- 2. TABLE PERTUBUHAN (Info Organisasi, Background, Lagu)
+CREATE TABLE pertubuhan (
+  id SERIAL PRIMARY KEY,
+  nama VARCHAR(100) NOT NULL,
+  image_url VARCHAR(255),
+  sijil_url VARCHAR(255),
+  visi TEXT,
+  misi TEXT,
+  background_url VARCHAR(255),
+  background_music_url VARCHAR(255), -- Untuk upload lagu latar
+  syarat_kelayakan TEXT,
+  syarat_keahlian TEXT,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 
-## Ciri-ciri Utama
+-- 3. TABLE PLAYLIST (Lagu)
+CREATE TABLE playlist (
+  id SERIAL PRIMARY KEY,
+  nama_lagu VARCHAR(100) NOT NULL,
+  file_url VARCHAR(255) NOT NULL,
+  is_active BOOLEAN DEFAULT TRUE,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 
-- **Pengurusan Ahli & Pertubuhan**
-  - Tambah, kemaskini, dan paparan maklumat ahli.
-  - Paparan profil pertubuhan (logo, visi, misi, latar belakang).
-- **Bayaran & Transaksi**
-  - Rekod bayaran ahli, resit, dan status pembayaran.
-- **Kematian**
-  - Rekod kematian, sebab, dan senarai ahli meninggal.
-- **Waris**
-  - Simpan maklumat waris bagi setiap peserta.
-- **Playlist & Lagu**
-  - Boleh upload lagu latar, paparan playlist.
-- **Emergency**
-  - Butang emergency untuk setiap peserta dan peserta belum bayar.
-  - Log tindakan emergency.
-- **Paparan Mesra Pengguna**
-  - Boleh "hide" maklumat sensitif (IC, alamat, no waris) dari paparan umum.
-  - Warna/gambar latar boleh diubah admin.
-- **Sekuriti**
-  - Password hash, kawalan akses maklumat sensitif.
+-- 4. TABLE PESERTA (Ahli)
+CREATE TABLE peserta (
+  id SERIAL PRIMARY KEY,
+  nama VARCHAR(100) NOT NULL,
+  tarikh_lahir DATE,
+  no_keahlian VARCHAR(30) UNIQUE,
+  tarikh_keahlian DATE,
+  status VARCHAR(20) DEFAULT 'aktif',
+  image_url VARCHAR(255),
+  ic_depan_url VARCHAR(255),
+  ic_belakang_url VARCHAR(255),
+  alamat TEXT,
+  phone VARCHAR(30),
+  resit_url VARCHAR(255),
+  surat_ibubapa_url VARCHAR(255),
+  playlist_id INT REFERENCES playlist(id) ON DELETE SET NULL,
+  pertubuhan_id INT REFERENCES pertubuhan(id) ON DELETE SET NULL,
+  is_payment_done BOOLEAN DEFAULT FALSE, -- status bayaran
+  emergency_status BOOLEAN DEFAULT FALSE, -- untuk button emergency
+  hidden_fields TEXT, -- comma separated fields yang perlu hide untuk paparan umum
+  is_active BOOLEAN DEFAULT TRUE, -- untuk hide profile bila perlu
+  deactivation_reason TEXT, -- sebab pembatalan ahli
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 
----
+-- 5. TABLE WARIS (Maklumat Waris Peserta)
+CREATE TABLE waris (
+  id SERIAL PRIMARY KEY,
+  peserta_id INT REFERENCES peserta(id) ON DELETE CASCADE,
+  nama VARCHAR(100) NOT NULL,
+  hubungan VARCHAR(50),
+  no_tel VARCHAR(20)
+);
 
-## Struktur Database
+-- 6. TABLE TRANSAKSI (Bayaran)
+CREATE TABLE transaksi (
+  id SERIAL PRIMARY KEY,
+  peserta_id INT REFERENCES peserta(id) ON DELETE CASCADE,
+  tarikh DATE,
+  jenis VARCHAR(30),
+  jumlah DECIMAL(10,2),
+  resit_url VARCHAR(255)
+);
 
-Semua jadual utama telah disepadukan:
-- `admin`
-- `pertubuhan`
-- `playlist`
-- `peserta`
-- `waris`
-- `transaksi`
-- `kematian`
-- `emergency_log`
+-- 7. TABLE KEMATIAN (Rekod Kematian)
+CREATE TABLE kematian (
+  id SERIAL PRIMARY KEY,
+  peserta_id INT REFERENCES peserta(id) ON DELETE CASCADE,
+  tarikh DATE,
+  sebab VARCHAR(255)
+);
 
-Skrip penuh SQL: [`ekematian_schema.sql`](ekematian_schema.sql)
+-- 8. TABLE EMERGENCY LOG (Audit Emergency Actions)
+CREATE TABLE emergency_log (
+  id SERIAL PRIMARY KEY,
+  peserta_id INT REFERENCES peserta(id) ON DELETE CASCADE,
+  action_by INT REFERENCES admin(id) ON DELETE SET NULL,
+  action_type VARCHAR(50), -- contoh: 'emergency_called', 'hide_info'
+  action_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 
----
+-- 9. VIEW UNTUK PAPARAN UMUM (Elak Papar Data Sensitif)
+CREATE OR REPLACE VIEW peserta_paparan_umum AS
+SELECT
+  p.id, p.nama, p.no_keahlian, p.tarikh_keahlian, p.status, p.image_url,
+  p.playlist_id, p.pertubuhan_id, p.is_payment_done, p.emergency_status,
+  p.is_active,
+  -- Papar profile pertubuhan
+  per.nama AS pertubuhan_nama,
+  per.background_url,
+  per.background_music_url
+FROM peserta p
+LEFT JOIN pertubuhan per ON p.pertubuhan_id = per.id
+WHERE p.is_active = TRUE
+AND (p.hidden_fields IS NULL OR POSITION('all' IN p.hidden_fields) = 0);
 
-## Cara Guna (Android/SQLite)
+-- 10. TRIGGER: AUTO-GENERATE NO KEAHLIAN (Contoh)
+CREATE OR REPLACE FUNCTION peserta_auto_no_keahlian()
+RETURNS TRIGGER AS $$
+BEGIN
+  IF NEW.no_keahlian IS NULL OR NEW.no_keahlian = '' THEN
+    NEW.no_keahlian := 'EKM-' || TO_CHAR(NOW(), 'YYMMDD') || '-' || nextval('peserta_id_seq');
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
 
-1. **Salin skrip** `ekematian_schema.sql` ke projek anda.
-2. **Import** ke SQLite (contoh guna DB Browser for SQLite, atau dalam Room Migration).
-3. **Integrasi ke aplikasi Android**:
-    - Boleh guna Room, SQLiteOpenHelper, atau library ORM Android lain.
-    - Untuk auto-generate no keahlian gunakan logik di aplikasi (`EKM-YYMMDD-ID`).
-    - Untuk sekuriti, pastikan hash password dan kawal akses field sensitif di app/backend.
+CREATE TRIGGER tg_auto_no_keahlian
+BEFORE INSERT ON peserta
+FOR EACH ROW
+EXECUTE FUNCTION peserta_auto_no_keahlian();
 
----
+-- 11. INDEX (Laju carian peserta & transaksi)
+CREATE INDEX idx_peserta_nama ON peserta(nama);
+CREATE INDEX idx_transaksi_peserta ON transaksi(peserta_id);
 
-## Contoh Skrip Import (Android Room/SQLiteOpenHelper)
-```java
-// Contoh Room migration
-db.execSQL(FileUtils.readFileFromAssets("ekematian_schema.sql"));
-```
+-- 12. SAMPEL DATA (optional)
+-- INSERT INTO pertubuhan (nama, visi, misi) VALUES ('Pertubuhan Contoh', 'Visi Hebat', 'Misi Hebat');
 
----
+-- 13. SEKURITI: Pastikan akses ke password & hidden_fields hanya pada admin
+-- (Implement di backend/middleware: jangan query terus kolum sensitif di UI awam!)
 
-## Nota & Penyesuaian
-
-- **Jangan papar maklumat sensitif** (IC, alamat, no tel, waris) di paparan umum.
-- Emergency, pembayaran, dan hide info telah tersedia di struktur DB.
-- Untuk kemudahan testing/demo, boleh tambah data contoh (dummy) jika perlu.
-
----
-
-## Sumbangan
-Pull request dan penambahbaikan dialu-alukan!
-
----
-
-## Lesen
-Sila rujuk fail LICENSE.
+-- =========================
+-- END OF FILE
+-- =========================
